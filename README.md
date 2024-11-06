@@ -1,2 +1,7 @@
 # Anomaly-Detector
 Anomaly detector using LSTM-Autoencoder for detecting anomalies in conveyor belt vibration sensors
+## Anomaly Detection Approach
+
+In practice, anomaly detection can be implemented using two different techniques. The first technique involves generating real-time alerts based on the monitored system. The second technique records events for subsequent analysis. The first approach is somewhat risky, as anomalies do not necessarily indicate a problem within the system. This could lead to the generation of "noise" and increase the operational costs. The second technique, while "risk-averse," does not allow for timely intervention in case of system issues.
+
+For these reasons, this study adopts a hybrid approach, with the following logic: an autoencoder is a type of neural network that learns to compress input data into a lower-dimensional representation and then reconstructs the original input from the compressed data. If the input data are "normal," the autoencoder will be able to reconstruct them with a low reconstruction error. Conversely, if the data are "anomalous," the reconstruction error will be significantly higher. This logic was used to detect anomalies. After training, the reconstruction loss (MAE) is calculated on both the training and test data, and using the probability distribution of the loss function on the training data, a threshold was established. If this threshold is exceeded, it indicates the presence of an anomaly.
