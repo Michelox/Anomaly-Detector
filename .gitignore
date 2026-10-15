@@ -1,0 +1,19 @@
+# Raw sensor data / generated results
+data/
+outputs/
+*.csv
+*.joblib
+*.keras
+*.h5
+*.png
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.venv/
+venv/
+*.egg-info/
+build/
+dist/
