@@ -1,41 +1,112 @@
-# Anomaly-Detector
-Anomaly detector using LSTM-Autoencoder for detecting anomalies in conveyor belt vibration sensors
-## Anomaly Detection Approach
+# Anomaly Detector — thesis project
 
-In practice, anomaly detection can be implemented using two different techniques. The first technique involves generating real-time alerts based on the monitored system. The second technique records events for subsequent analysis. The first approach is somewhat risky, as anomalies do not necessarily indicate a problem within the system. This could lead to the generation of "noise" and increase the operational costs. The second technique, while "risk-averse," does not allow for timely intervention in case of system issues.
+Offline anomaly detection on conveyor-belt vibration readings using a **Kalman filter**, **seasonal decomposition**, and an **LSTM autoencoder**. This repository contains the original thesis PDF [`Tesi (1).pdf`](Tesi%20(1).pdf) and a refactored, reproducible Python pipeline.
 
-For these reasons, this study adopts a hybrid approach, with the following logic: an autoencoder is a type of neural network that learns to compress input data into a lower-dimensional representation and then reconstructs the original input from the compressed data. If the input data are "normal," the autoencoder will be able to reconstruct them with a low reconstruction error. Conversely, if the data are "anomalous," the reconstruction error will be significantly higher. This logic was used to detect anomalies. After training, the reconstruction loss (MAE) is calculated on both the training and test data, and using the probability distribution of the loss function on the training data, a threshold was established. If this threshold is exceeded, it indicates the presence of an anomaly.
-## Dataset
+> **Research prototype, not a real-time safety or maintenance alarm.** The original analysis and dataset assumptions are discussed below. The private/raw sensor CSVs are **not included** in this repository.
 
-The original datasets consisted of three features representing the three axial directions of the VTV-122 vibration sensor. The dataset containing non-anomalous values had three columns and 9,632,614 rows, with each value recorded at a sampling frequency of 400 points per second. The dataset containing anomalous data also had three columns but consisted of 531,370 rows, with the same sampling frequency of 400 points per second.
+## Why this refactor?
 
-For this study, we chose to keep only the feature representing the z-axis, as it was the axis most affected by vibrations.
+The historical notebook-export script mixed data loading, visualizations, filtering, feature extraction, model training and scoring in one file. It contained notebook-only syntax, empty CSV paths and references to intermediate CSV files that were never created. Its original form is retained, unmodified, at [`legacy/Anomaly detector.py`](legacy/Anomaly%20detector.py) for academic provenance.
 
-The non-anomalous data contain peaks, which are due to sensor setup errors. For this reason, these observations were excluded from the dataset, reducing the number of rows to 3,100,000. 
+The new implementation has:
+- A runnable CLI with explicit CSV paths and parameters.
+- Isolated, testable preprocessing, autoencoder and scoring modules.
+- No train/test overlap in the normal-data prefix; scaling is fit **only on train**.
+- A threshold derived **only from train reconstruction loss** (by default the maximum, as in the original study).
+- Saved model, scaler, window-level scores, configuration and a non-interactive loss chart.
+- Synthetic unit tests and GitHub Actions checks.
 
-After this, the construction of the training and test sets proceeded as follows: The training set was formed from the original observations in the non-anomalous dataset, with the last one thousand observations replaced by the first one thousand from the anomalous dataset. The test set was composed of observations from the anomalous dataset, with the first one thousand replaced by the last one thousand observations from the non-anomalous series.
-## Kalman's filter
-As mentioned earlier, the data comprising the dataset were collected from vibration sensors, which are subject to a certain degree of measurement error (or noise). This is where the Kalman Filter comes into play, as it helps to provide cleaner and more accurate training and test data for training and evaluating the network.
-## Seasonality Extraction
+## Installation
 
-A time series can be decomposed into its constituent components using a statistical technique called Seasonal Decomposition. These components are:
+Python 3.10+ is required. A TensorFlow-compatible Python environment is required for training (CPU is sufficient for small runs).
 
-Trend: This refers to long-term changes in the series observed over time, representing the general direction in which the series is moving.
-Seasonality: This refers to the cyclical patterns observed within a predetermined time period.
-Residuals: This represents the random variation that remains after accounting for the trend and seasonality components. It captures the noise or error in the data that cannot be explained by trend or seasonality.
-In general, seasonal decomposition is used to gain insights into the hidden dynamics within time series data.
+```bash
+python -m venv .venv
+source .venv/bin/activate
+python -m pip install -e ".[train,test]"
+python -m pytest -q
+```
 
-In our study, after filtering the data with the Kalman Filter, we applied seasonal decomposition using the seasonal_decompose function from the statsmodels.tsa.seasonal module in the Python library statsmodels, which allowed us to decompose the series into the components mentioned above.
+On Windows, activate with `.venv\Scripts\activate`.
 
-Of the three main components, we decided to include only the seasonality in the dataset, as the trends in both the anomalous and normal time series were similar. To identify anomalies, our focus was on distinguishing characteristics between the two series, which also allowed us to reduce the dataset’s size and achieve faster computation times.
-## Data Normalization
+## Input data and running
 
-Finally, before being fed into the network, the data are normalized using the `"sklearn.preprocessing"` module from the `scikit-learn` library in Python, with the `MinMaxScaler` class. This class scales each feature/independent variable in the data so that they fall within a specified range between 0 and 1.
+Provide **two CSVs**: one recorded under normal operation, one from an anomalous-source recording. Each file must have at least three columns (x, y, z); the third column is read as the z-axis signal. By default the first row is treated as a header; pass `--no-header` if both CSVs have no column headers. Values must be numeric and finite.
 
-After completing this step, the training and test datasets are finally ready to be used for training and evaluating the network.
+```bash
+python -m anomaly_detector \
+  --normal-csv data/normal.csv \
+  --anomalous-csv data/anomalous.csv \
+  --output-dir outputs/run1
+```
 
+To reproduce the approximate **original training segment selection**, assuming you have the original 9.6-million-row normal signal, pass:
 
+```bash
+python -m anomaly_detector \
+  --normal-csv data/normal.csv \
+  --anomalous-csv data/anomalous.csv \
+  --train-start 5900000 \
+  --train-end 9000000 \
+  --healthy-test-samples 1000 \
+  --seasonal-period 3600 \
+  --window-size 100 \
+  --window-stride 1 \
+  --epochs 20 \
+  --batch-size 50
+```
 
+**Important:** The example mirrors intended parameters, **not verified numerical reproducibility**. The legacy script had conflicting dataset construction and intermediate-file assumptions; the original sensor CSVs, trained weights and exact environment are not available in this repository. For large datasets, `--window-stride 1` is very RAM-intensive; use the default `100` for a more practical non-overlapping analysis.
 
+## Pipeline
 
+1. Select a **train-only normal segment**. Its next `--healthy-test-samples` normal observations form a held-out test prefix. Append the anomalous-source recording to that prefix. The selected healthy samples are excluded from training.
+2. Apply a scalar Kalman filter independently to train/test (process variance 0.01; measurement variance 0.1).
+3. Extract additive seasonal structure with `statsmodels.seasonal_decompose`. The two model features are **filtered z** and **seasonality**.
+4. Fit `MinMaxScaler` only on train and transform test with the same scaler.
+5. Create fixed-length windows (100 samples by default). `--window-stride 100` saves memory; `1` recreates the original dense overlapping-window strategy.
+6. Train an LSTM autoencoder (16→8→RepeatVector→8→16 units, MAE loss, Adam) with chronologically ordered 20% validation windows.
+7. Calculate mean absolute reconstruction error per window. Flag windows with error greater than the train-only threshold (`--threshold-quantile 1.0` corresponds to the original training maximum).
 
+**Sampling-period caveat:** the original script used `period=60*60` and described it as one hour. `seasonal_decompose` interprets this as **3,600 samples**, equivalent to **9 seconds at 400 Hz**, not one hour. The refactor keeps 3,600 samples as a configurable historical value. Establish and justify the correct physical period before interpreting findings.
+
+**Offline caveat:** `seasonal_decompose` uses complete train/test recordings independently. In particular, test features can depend on later test observations; this is **not a causal streaming detector**. A deployment-grade design should learn a train-only seasonal representation or switch to a causal feature extractor. Source overlap (`overlaps_anomalous_source`) is provenance, not verified per-sample ground truth.
+
+## Outputs
+
+The output directory contains:
+
+| File | Contents |
+| --- | --- |
+| `model.keras` | Trained Keras autoencoder |
+| `scaler.joblib` | Train-fitted feature scaler |
+| `train_scores.csv` | Train windows: start sample, MAE, threshold, anomaly flag |
+| `test_scores.csv` | Test windows plus anomalous-source overlap indicator |
+| `loss.png` | Train/test loss plot with threshold |
+| `run.json` | Parameters, threshold and aggregate counts |
+
+Intermediate CSVs and model artifacts are generated on demand and excluded by `.gitignore`. Keep raw sensor files in `data/` (also ignored), not in Git.
+
+## Repository layout
+
+```text
+src/anomaly_detector/
+  preprocessing.py  # CSV loading, splitting, Kalman, seasonality, windows
+  model.py          # Keras architecture
+  scoring.py        # reconstruction MAE and train-only threshold
+  cli.py            # orchestration, outputs and CLI
+  __main__.py       # python -m anomaly_detector
+tests/              # synthetic tests without TensorFlow
+legacy/             # preserved original notebook-export script
+.github/workflows/  # Python unit test workflow
+pyproject.toml       # package and dependency metadata
+Tesi (1).pdf         # original thesis document
+```
+
+## Limitations and research considerations
+
+- No raw sensor data, trained artifacts or measured scores are shipped. Results **have not been reproduced** against the thesis data.
+- The original study selected z-axis vibrations out of three measured axes (400 Hz sampling), used a Kalman filter and LSTM reconstruction MAE. Default parameters and dataset boundaries are tunable; changed segmentation/stride will change numerical results.
+- Anomalous-source recordings may include normal intervals. Therefore `test_scores.csv` does **not** claim verified precision/recall or a per-sample ground-truth label.
+- Test-time seasonal decomposition is offline, and the training-maximum threshold is sensitive to outliers. Validate a threshold on representative held-out normal data before any practical use.
+- The legacy script is archived **without editing its behavior** to preserve the original academic record.
