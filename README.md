@@ -1,154 +1,154 @@
 # Anomaly Detector
-### Dalle vibrazioni industriali al rilevamento delle anomalie con un LSTM Autoencoder
+### From industrial vibrations to anomaly detection with an LSTM Autoencoder
 
-Questo progetto esplora una domanda: **è possibile riconoscere condizioni di funzionamento anomale di un impianto industriale imparando a ricostruire le sue vibrazioni?**
+This project explores a question: **can we identify abnormal operating conditions in an industrial plant by learning to reconstruct its vibration signals?**
 
-Il percorso parte dai segnali di un banco di prova, ne riduce il rumore e ne estrae la componente stagionale. Una rete LSTM Autoencoder apprende a ricostruire sequenze temporali; l'errore di ricostruzione diventa poi il criterio per individuare le anomalie.
+The workflow starts with signals from a laboratory testbed, reduces measurement noise, and extracts seasonality. An LSTM Autoencoder learns to reconstruct temporal sequences; reconstruction error then becomes the basis for detecting anomalies.
 
-Il README accompagna la lettura della tesi **“Uso di modelli di Long Short-Term Memory per l’Anomaly Detection negli impianti industriali”**, di **Michele Ciaramidaro**, Corso di Laurea in Ingegneria Gestionale, Università degli Studi di Messina, A.A. **2023/2024**. Relatore: **Prof. Dario Bruneo**.
+This README walks through the thesis **“Using Long Short-Term Memory Models for Anomaly Detection in Industrial Plants”** (original title: *Uso di modelli di Long Short-Term Memory per l’Anomaly Detection negli impianti industriali*), by **Michele Ciaramidaro**, Management Engineering degree programme, University of Messina, academic year **2023/2024**. Supervisor: **Prof. Dario Bruneo**.
 
-**[Leggi la tesi completa](Tesi%20%281%29.pdf)** · [Walkthrough](#walkthrough-della-tesi) · [Risultati](#6-risultati-e-conclusioni) · [Esecuzione](#eseguire-il-progetto)
+**[Read the full thesis (Italian)](Tesi%20%281%29.pdf)** · [Walkthrough](#thesis-walkthrough) · [Results](#6-results-and-conclusions) · [Run the project](#running-the-project)
 
-## Walkthrough della tesi
+## Thesis walkthrough
 
-### 1. Il problema: riconoscere un cambiamento nel funzionamento
-*Capitolo 1; §2.1–2.2*
+### 1. The problem: recognizing a change in operation
+*Chapter 1; §2.1–2.2*
 
-Nel monitoraggio industriale, una variazione del segnale può indicare un cambiamento nelle condizioni operative. Riconoscerla aiuta a orientare le verifiche sull'impianto, anche se un'anomalia non coincide necessariamente con un guasto.
+In industrial monitoring, a change in a signal may indicate a change in operating conditions. Detecting it can help guide equipment inspections, although an anomaly does not necessarily imply a fault.
 
-Lo studio considera una **replica in scala di un impianto per il trasporto e l'assemblaggio di componenti automobilistiche**, composta da due motori e sei nastri che movimentano un carrello. Il banco permette di introdurre diverse perturbazioni meccaniche. Nell'esperimento descritto, le condizioni confrontate sono **con carico e senza carico**.
+The study examines a **scaled replica of a plant for transporting and assembling automotive components**, consisting of two motors and six conveyor belts that move a trolley. The testbed supports several types of mechanical disturbance. In the experiment described, the conditions compared are **loaded and unloaded operation**.
 
-Tra i sensori del banco, l'analisi utilizza le misure di vibrazione attribuite nella tesi al **VTV-122**. L'obiettivo è distinguere i comportamenti delle due serie attraverso le loro caratteristiche temporali.
+Among the testbed's sensors, the analysis uses the vibration measurements attributed in the thesis to the **VTV-122**. The goal is to distinguish the behavior of the two recordings through their temporal characteristics.
 
-### 2. Dai dati grezzi alle sequenze utili
-*Capitolo 2*
+### 2. From raw measurements to useful sequences
+*Chapter 2*
 
-#### Selezione del segnale e costruzione dei dataset
+#### Signal selection and dataset construction
 
-Le registrazioni contengono tre colonne, corrispondenti agli assi `x`, `y` e `z`, campionate a **400 Hz**.
+The recordings contain three columns, corresponding to the `x`, `y`, and `z` axes, sampled at **400 Hz**.
 
-| Dato sperimentale | Valore riportato nella tesi |
+| Experimental data | Value reported in the thesis |
 | --- | ---: |
-| Osservazioni nella registrazione normale | 9.632.614 |
-| Osservazioni nella registrazione anomala | 531.370 |
-| Osservazioni normali dopo l'esclusione dei picchi | 3.100.000 |
-| Asse selezionato | z |
+| Observations in the normal recording | 9,632,614 |
+| Observations in the anomalous recording | 531,370 |
+| Normal observations after excluding spikes | 3,100,000 |
+| Selected axis | z |
 
-L'asse **z** viene mantenuto perché risulta il più sollecitato dalle vibrazioni. I picchi nella serie normale, attribuiti a errori di configurazione dei sensori, vengono esclusi prima della costruzione dei dataset.
+The **z-axis** is retained because it shows the strongest response to vibration. Spikes in the normal recording, attributed to sensor setup errors, are excluded before constructing the datasets.
 
-Il §2.3 descrive questo scambio di osservazioni:
+Section 2.3 describes the following exchange of observations:
 
-- **Training set:** la serie normale ripulita, con le ultime 1.000 osservazioni sostituite dalle prime 1.000 della serie anomala.
-- **Test set:** la serie anomala, con le prime 1.000 osservazioni sostituite dalle ultime 1.000 della serie normale.
+- **Training set:** the cleaned normal series, with its last 1,000 observations replaced by the first 1,000 observations from the anomalous series.
+- **Test set:** the anomalous series, with its first 1,000 observations replaced by the last 1,000 observations from the normal series.
 
-Il training descritto nella tesi contiene quindi anche una piccola porzione della registrazione anomala. Le Figure 1 e 2 mostrano rispettivamente i segnali iniziali e i dataset costruiti.
+The training set described in the thesis therefore also contains a small portion of the anomalous recording. Figures 1 and 2 show the initial signals and the resulting datasets, respectively.
 
-#### Riduzione del rumore con il filtro di Kalman
+#### Noise reduction with the Kalman filter
 
-Il filtro di Kalman aggiorna ricorsivamente una stima del segnale combinando previsione e misura. Serve a ridurre il rumore di acquisizione prima dell'analisi delle sequenze.
+The Kalman filter recursively updates an estimate of the signal by combining prediction and measurement. It reduces acquisition noise before sequence analysis.
 
-Il codice del §2.4.3 impiega un modello scalare con `A = H = 1`, covarianza del rumore di processo `Q = 0.01` e covarianza del rumore di misura `R = 0.1`. La Figura 3 mostra i segnali filtrati.
+The code in §2.4.3 uses a scalar model with `A = H = 1`, process noise covariance `Q = 0.01`, and measurement noise covariance `R = 0.1`. Figure 3 shows the filtered signals.
 
-#### Estrazione della stagionalità
+#### Extracting seasonality
 
-La decomposizione separa la serie in **trend, stagionalità e residui**. Poiché i trend delle due condizioni risultano simili, lo studio aggiunge al dataset la componente stagionale, cercando nei pattern ricorrenti informazioni utili a distinguere i comportamenti.
+Decomposition separates the series into **trend, seasonality, and residuals**. Since the trends in the two operating conditions are similar, the study adds the seasonal component to the dataset, looking for recurring patterns that help distinguish their behavior.
 
-L'ingresso del modello comprende così **due feature: il segnale z filtrato e la stagionalità**, coerentemente con la forma dell'input riportata nel Capitolo 6. La Figura 4 illustra la decomposizione.
+The model therefore receives **two features: the filtered z-axis signal and seasonality**, consistent with the input shape reported in Chapter 6. Figure 4 illustrates the decomposition.
 
-#### Normalizzazione
+#### Normalization
 
-Le feature vengono normalizzate con `MinMaxScaler` prima dell'ingresso nella rete. Nel pacchetto Python attuale lo scaler viene adattato esclusivamente al training set e poi applicato al test set.
+Features are normalized with `MinMaxScaler` before entering the network. In the Python package, the scaler is fitted exclusively on the training set and then applied to the test set.
 
-### 3. Perché combinare LSTM e autoencoder?
-*Capitoli 3, 4 e 5*
+### 3. Why combine LSTMs and autoencoders?
+*Chapters 3, 4, and 5*
 
-Le vibrazioni sono **serie temporali**: l'ordine delle misure contiene informazione. Dopo un'introduzione all'apprendimento automatico, la tesi passa dalle reti ricorrenti alle **Long Short-Term Memory**, che usano uno stato di memoria e meccanismi di selezione dell'informazione per modellare dipendenze nel tempo.
+Vibration measurements form **time series**: their order carries information. After introducing machine learning, the thesis moves from recurrent neural networks to **Long Short-Term Memory** networks, which use a memory state and information gates to model dependencies over time.
 
-L'**autoencoder** introduce invece un compito di ricostruzione:
+An **autoencoder** introduces a reconstruction task:
 
-- L'**encoder** comprime la sequenza in una rappresentazione interna.
-- Il **decoder** usa quella rappresentazione per ricostruire la sequenza di partenza.
-- La differenza tra ingresso e ricostruzione misura quanto bene il modello rappresenta quel comportamento.
+- The **encoder** compresses the sequence into an internal representation.
+- The **decoder** uses that representation to reconstruct the original sequence.
+- The difference between the input and its reconstruction measures how well the model represents that behavior.
 
-Combinando i due approcci, la rete impara una rappresentazione delle sequenze di vibrazione. L'ipotesi del detector è che sequenze diverse dai pattern appresi producano errori di ricostruzione maggiori.
+Combining these approaches allows the network to learn a representation of vibration sequences. The detector's hypothesis is that sequences differing from the learned patterns will produce larger reconstruction errors.
 
-### 4. Costruire e addestrare il modello
+### 4. Building and training the model
 *§6.2–6.5*
 
-Il segnale viene suddiviso in **finestre di 100 campioni**, equivalenti a **0,25 secondi a 400 Hz**. Il codice della tesi avanza di un campione alla volta, producendo finestre sovrapposte. Ogni ingresso ha forma `(100, 2)`: 100 passi temporali e due feature.
+The signal is divided into **100-sample windows**, equivalent to **0.25 seconds at 400 Hz**. The thesis code advances one sample at a time, producing overlapping windows. Each input has shape `(100, 2)`: 100 time steps and two features.
 
-| Passaggio | Strato | Forma dell'output per finestra |
+| Stage | Layer | Output shape per window |
 | --- | --- | --- |
-| Ingresso | Sequenza di vibrazione e stagionalità | `100 × 2` |
-| Encoder | LSTM, 16 unità, restituisce la sequenza | `100 × 16` |
-| Rappresentazione compressa | LSTM, 8 unità | `8` |
-| Espansione temporale | RepeatVector, 100 ripetizioni | `100 × 8` |
-| Decoder | LSTM, 8 unità, restituisce la sequenza | `100 × 8` |
-| Decoder | LSTM, 16 unità, restituisce la sequenza | `100 × 16` |
-| Ricostruzione | TimeDistributed(Dense(2)) | `100 × 2` |
+| Input | Vibration and seasonality sequence | `100 × 2` |
+| Encoder | LSTM, 16 units, returns sequences | `100 × 16` |
+| Compressed representation | LSTM, 8 units | `8` |
+| Temporal expansion | RepeatVector, 100 repetitions | `100 × 8` |
+| Decoder | LSTM, 8 units, returns sequences | `100 × 8` |
+| Decoder | LSTM, 16 units, returns sequences | `100 × 16` |
+| Reconstruction | TimeDistributed(Dense(2)) | `100 × 2` |
 
-Le LSTM utilizzano l'attivazione `tanh`. L'output ha la stessa forma dell'input, così da confrontare direttamente ogni sequenza con la sua ricostruzione.
+The LSTM layers use `tanh` activation. The output has the same shape as the input, allowing each sequence to be compared directly with its reconstruction.
 
-| Parametro | Esperimento descritto nella tesi |
+| Parameter | Experiment described in the thesis |
 | --- | ---: |
-| Lunghezza della finestra | 100 campioni |
-| Epoche | 20 |
+| Window length | 100 samples |
+| Epochs | 20 |
 | Batch size | 50 |
-| Quota di validazione | 25% |
-| Loss di ricostruzione | Mean Absolute Error (MAE) |
+| Validation split | 25% |
+| Reconstruction loss | Mean Absolute Error (MAE) |
 
-Il pacchetto attuale compila il modello con **Adam** e loss **MAE**. La Figura 11 della tesi mostra l'andamento della loss di training e validazione, utile per osservare l'apprendimento e l'eventuale divergenza tra le due curve.
+The package compiles the model with **Adam** and **MAE** loss. Figure 11 in the thesis shows training and validation loss, helping track learning and any divergence between the two curves.
 
-### 5. Trasformare l'errore in una decisione
+### 5. Turning reconstruction error into a decision
 *§6.1, §6.6–6.7*
 
-Dopo l'addestramento, il modello ricostruisce le sequenze di training e di test. Il detector misura l'errore assoluto medio tra i valori osservati e quelli ricostruiti.
+After training, the model reconstructs the training and test sequences. The detector measures the mean absolute error between the observed and reconstructed values.
 
-Per una finestra con `T` passi temporali e `F` feature, il punteggio utilizzato nel pacchetto attuale è:
+For a window with `T` time steps and `F` features, the score used in the package is:
 
 ```math
 \mathrm{MAE}(X,\hat X)=\frac{1}{TF}\sum_{t=1}^{T}\sum_{f=1}^{F}|X_{t,f}-\hat X_{t,f}|
 ```
 
-La tesi sceglie come **soglia il massimo errore di ricostruzione sul training set**. Una sequenza viene segnalata come anomala quando il suo errore supera questa soglia.
+The thesis sets the **threshold to the maximum reconstruction error on the training set**. A sequence is flagged as anomalous when its error exceeds this threshold.
 
-La **Figura 12** mostra la distribuzione della loss sul training; la **Figura 13** confronta le distribuzioni di training e test con la soglia. È il passaggio che collega l'apprendimento della rete alla decisione finale.
+**Figure 12** shows the training loss distribution; **Figure 13** compares the training and test distributions against the threshold. This step connects the network's learned representation to the final detection decision.
 
-### 6. Risultati e conclusioni
-*Capitolo 7, Figura 14*
+### 6. Results and conclusions
+*Chapter 7, Figure 14*
 
-La tesi riporta i seguenti risultati sul test set dell'esperimento:
+The thesis reports the following results on the experimental test set:
 
-| Metrica | Risultato riportato |
+| Metric | Reported result |
 | --- | ---: |
-| Precision | 1,00 |
-| Recall | 1,00 |
-| F1-score | 1,00 |
+| Precision | 1.00 |
+| Recall | 1.00 |
+| F1-score | 1.00 |
 
-Il testo delle conclusioni riporta inoltre un'accuratezza del **100%**. La valutazione considera anomala la serie di test ad eccezione delle prime 1.000 osservazioni, provenienti dalla serie normale.
+The conclusions also report **100% accuracy**. The evaluation treats the test series as anomalous except for the first 1,000 observations, which originate from the normal series.
 
-Nel protocollo descritto, questi risultati indicano una separazione completa delle classi valutate. Il contributo dello studio è mostrare come **pulizia del segnale, stagionalità e ricostruzione con LSTM** possano lavorare insieme per distinguere condizioni operative differenti.
+Under the described protocol, these results indicate complete separation of the evaluated classes. The study shows how **signal cleaning, seasonality, and LSTM reconstruction** can work together to distinguish operating conditions.
 
-I risultati si riferiscono alle condizioni sperimentali e al test set descritti nella tesi. Per valutarne la generalizzazione servono nuove acquisizioni e un protocollo di test indipendente.
+These results apply to the experimental conditions and test set described in the thesis. Assessing generalization requires new recordings and an independent test protocol.
 
-## Orientarsi nel repository
+## Repository guide
 
-| Risorsa | Contenuto |
+| Resource | Contents |
 | --- | --- |
-| [Tesi completa](Tesi%20%281%29.pdf) | Contesto scientifico, metodo, figure e risultati |
-| [Preprocessing](src/anomaly_detector/preprocessing.py) | Lettura CSV, split, filtro di Kalman, stagionalità e finestre |
-| [Modello](src/anomaly_detector/model.py) | Architettura LSTM Autoencoder |
-| [Scoring](src/anomaly_detector/scoring.py) | MAE, soglia e classificazione delle finestre |
-| [CLI](src/anomaly_detector/cli.py) | Addestramento, scoring e salvataggio degli output |
-| [Test](tests/test_preprocessing.py) | Controlli su dati sintetici |
-| [Configurazione](pyproject.toml) | Dipendenze e installazione |
-| [Script dell'esperimento](legacy/Anomaly%20detector.py) | Implementazione conservata per consultazione |
+| [Full thesis](Tesi%20%281%29.pdf) | Scientific background, methodology, figures, and results |
+| [Preprocessing](src/anomaly_detector/preprocessing.py) | CSV loading, splitting, Kalman filtering, seasonality, and windowing |
+| [Model](src/anomaly_detector/model.py) | LSTM Autoencoder architecture |
+| [Scoring](src/anomaly_detector/scoring.py) | MAE, threshold, and window classification |
+| [CLI](src/anomaly_detector/cli.py) | Training, scoring, and output saving |
+| [Tests](tests/test_preprocessing.py) | Checks using synthetic data |
+| [Configuration](pyproject.toml) | Dependencies and installation |
+| [Experiment script](legacy/Anomaly%20detector.py) | Implementation preserved for reference |
 
-## Eseguire il progetto
+## Running the project
 
-### Installazione
+### Installation
 
-Servono **Python 3.10+** e un ambiente compatibile con TensorFlow.
+You need **Python 3.10+** and a TensorFlow-compatible environment.
 
 ```bash
 git clone https://github.com/Michelox/Anomaly-Detector.git
@@ -158,17 +158,17 @@ source .venv/bin/activate
 python -m pip install -e ".[train,test]"
 ```
 
-Su Windows, attivare l'ambiente con `.venv\Scripts\activate`.
+On Windows, activate the environment with `.venv\Scripts\activate`.
 
-### Preparazione degli input
+### Preparing the inputs
 
-I CSV sperimentali non sono inclusi nel repository: occorre fornire i propri dati, già ripuliti dagli eventuali errori di acquisizione.
+The experimental CSV files are not included in the repository. Supply your own data, with acquisition errors already cleaned.
 
-Fornire due CSV: uno con misure normali e uno con la registrazione anomala. Il programma legge la **terza colonna**, corrispondente all'asse z, che deve contenere valori numerici finiti. L'intestazione è prevista per impostazione predefinita; aggiungere `--no-header` se entrambi i file ne sono privi.
+Provide two CSV files: one containing normal measurements and one containing the anomalous recording. The program reads the **third column**, corresponding to the z-axis, which must contain finite numeric values. A header is expected by default; add `--no-header` if both files lack one.
 
-Collocare i file, ad esempio, in `data/normal.csv` e `data/anomalous.csv`. Con il periodo predefinito, ciascuna serie risultante dallo split deve contenere almeno **7.200 campioni**, necessari alla decomposizione stagionale. Il programma riserva inoltre 1.000 campioni normali al test. Il periodo è espresso in campioni: 3.600 campioni corrispondono a 9 secondi a 400 Hz. La pipeline lavora offline, perché la decomposizione stagionale usa l'intera serie fornita.
+For example, place the files at `data/normal.csv` and `data/anomalous.csv`. With the default seasonal period, each series produced by the split must contain at least **7,200 samples** for seasonal decomposition. The program also reserves 1,000 normal samples for testing. The period is measured in samples: 3,600 samples correspond to 9 seconds at 400 Hz. The pipeline operates offline because seasonal decomposition uses the entire supplied series.
 
-### Addestramento e rilevamento
+### Training and detection
 
 ```bash
 python -m anomaly_detector \
@@ -177,28 +177,28 @@ python -m anomaly_detector \
   --output-dir outputs/run1
 ```
 
-I valori predefiniti includono finestre di 100 campioni, passo 100, 20 epoche e batch size 50. Per usare finestre sovrapposte come nel codice della tesi, aggiungere `--window-stride 1`: su milioni di osservazioni questa scelta aumenta sensibilmente il consumo di memoria e il tempo di calcolo.
+Defaults include 100-sample windows, a stride of 100, 20 epochs, and a batch size of 50. To use overlapping windows as in the thesis code, add `--window-stride 1`. With millions of observations, this substantially increases memory use and computation time.
 
-Per consultare tutte le opzioni e avviare i test:
+To inspect all options and run the tests:
 
 ```bash
 python -m anomaly_detector --help
 python -m pytest -q
 ```
 
-### Output
+### Outputs
 
-| File | Contenuto |
+| File | Contents |
 | --- | --- |
-| `model.keras` | Modello addestrato |
-| `scaler.joblib` | Scaler adattato ai dati di training |
-| `train_scores.csv` | Posizione delle finestre e loss sul training |
-| `test_scores.csv` | Loss, soglia e segnalazione delle finestre anomale |
-| `loss.png` | Grafico degli errori di ricostruzione e della soglia |
-| `run.json` | Parametri, soglia e conteggi dell'esecuzione |
+| `model.keras` | Trained model |
+| `scaler.joblib` | Scaler fitted on the training data |
+| `train_scores.csv` | Window positions and training loss |
+| `test_scores.csv` | Loss, threshold, and anomaly flags |
+| `loss.png` | Reconstruction errors and threshold plot |
+| `run.json` | Run parameters, threshold, and counts |
 
-In `test_scores.csv`, `is_anomaly` rappresenta la decisione del modello. `overlaps_anomalous_source` indica soltanto se la finestra interseca la registrazione anomala: è un'informazione sulla provenienza, non un'etichetta di guasto verificata.
+In `test_scores.csv`, `is_anomaly` represents the model's decision. `overlaps_anomalous_source` only indicates whether a window intersects the anomalous recording: it describes data provenance, not a verified fault label.
 
 ---
 
-**Riferimento:** Michele Ciaramidaro, *Uso di modelli di Long Short-Term Memory per l’Anomaly Detection negli impianti industriali*, Università degli Studi di Messina, A.A. 2023/2024. Per lo sviluppo teorico e i riferimenti bibliografici, consultare la [tesi completa](Tesi%20%281%29.pdf).
+**Reference:** Michele Ciaramidaro, *Uso di modelli di Long Short-Term Memory per l’Anomaly Detection negli impianti industriali*, University of Messina, academic year 2023/2024. See the [full thesis (Italian)](Tesi%20%281%29.pdf) for the theoretical development and bibliography.
