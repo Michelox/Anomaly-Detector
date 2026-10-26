@@ -1,127 +1,154 @@
-# Vibration-Based Anomaly Detection with an LSTM Autoencoder
+# Anomaly Detector
+### Dalle vibrazioni industriali al rilevamento delle anomalie con un LSTM Autoencoder
 
-A research project investigating **anomaly detection in industrial conveyor-belt vibration signals**. It uses the z-axis readings from a vibration sensor and an LSTM autoencoder to identify unusual behavior through reconstruction error.
+Questo progetto esplora una domanda: **è possibile riconoscere condizioni di funzionamento anomale di un impianto industriale imparando a ricostruire le sue vibrazioni?**
 
-📄 **Research document:** [Full thesis — `Tesi (1).pdf`](Tesi%20(1).pdf)
+Il percorso parte dai segnali di un banco di prova, ne riduce il rumore e ne estrae la componente stagionale. Una rete LSTM Autoencoder apprende a ricostruire sequenze temporali; l'errore di ricostruzione diventa poi il criterio per individuare le anomalie.
 
-> **About this README.** The research description and historical dataset details below are taken from the **original project README and the archived implementation**, alongside which the thesis PDF was published. The PDF itself could not be text-extracted in this editing session; therefore, this page does **not** claim to reproduce unverified numerical results or quotations from the PDF. For definitive scientific wording and findings, consult the document above. The current Python implementation is a *refactoring*, not an exact reproduction of the original experiment.
+Il README accompagna la lettura della tesi **“Uso di modelli di Long Short-Term Memory per l’Anomaly Detection negli impianti industriali”**, di **Michele Ciaramidaro**, Corso di Laurea in Ingegneria Gestionale, Università degli Studi di Messina, A.A. **2023/2024**. Relatore: **Prof. Dario Bruneo**.
 
-## 1. Research question and motivation
+**[Leggi la tesi completa](Tesi%20%281%29.pdf)** · [Walkthrough](#walkthrough-della-tesi) · [Risultati](#6-risultati-e-conclusioni) · [Esecuzione](#eseguire-il-progetto)
 
-The central question is whether an autoencoder trained to reconstruct vibration patterns associated with ordinary conveyor-belt operation can **distinguish unusual signals from typical operation** without requiring a manually annotated anomaly for every sample.
+## Walkthrough della tesi
 
-A real-time alert for every deviation could produce false alarms and operational noise; a purely retrospective analysis offers less immediate support to operators. The study describes a **hybrid detection rationale**: characterize normal behavior, calculate reconstruction errors and use an error threshold to highlight potentially anomalous intervals for further investigation. An anomaly score is **not proof of a mechanical fault**.
+### 1. Il problema: riconoscere un cambiamento nel funzionamento
+*Capitolo 1; §2.1–2.2*
 
-The research combines signal processing with unsupervised/semi-supervised learning:
+Nel monitoraggio industriale, una variazione del segnale può indicare un cambiamento nelle condizioni operative. Riconoscerla aiuta a orientare le verifiche sull'impianto, anche se un'anomalia non coincide necessariamente con un guasto.
 
-1. Select the most informative sensor axis.
-2. Filter measurement noise.
-3. Extract recurring patterns in the vibration signal.
-4. Normalize model inputs.
-5. Train a sequence autoencoder on normal-operation measurements.
-6. Flag windows that have an unusually high reconstruction error.
+Lo studio considera una **replica in scala di un impianto per il trasporto e l'assemblaggio di componenti automobilistiche**, composta da due motori e sei nastri che movimentano un carrello. Il banco permette di introdurre diverse perturbazioni meccaniche. Nell'esperimento descritto, le condizioni confrontate sono **con carico e senza carico**.
 
-## 2. Experimental data
+Tra i sensori del banco, l'analisi utilizza le misure di vibrazione attribuite nella tesi al **VTV-122**. L'obiettivo è distinguere i comportamenti delle due serie attraverso le loro caratteristiche temporali.
 
-According to the original repository description, measurements were collected using a **VTV-122** vibration sensor on a conveyor belt.
+### 2. Dai dati grezzi alle sequenze utili
+*Capitolo 2*
 
-| Property | Recorded in the original project description |
+#### Selezione del segnale e costruzione dei dataset
+
+Le registrazioni contengono tre colonne, corrispondenti agli assi `x`, `y` e `z`, campionate a **400 Hz**.
+
+| Dato sperimentale | Valore riportato nella tesi |
+| --- | ---: |
+| Osservazioni nella registrazione normale | 9.632.614 |
+| Osservazioni nella registrazione anomala | 531.370 |
+| Osservazioni normali dopo l'esclusione dei picchi | 3.100.000 |
+| Asse selezionato | z |
+
+L'asse **z** viene mantenuto perché risulta il più sollecitato dalle vibrazioni. I picchi nella serie normale, attribuiti a errori di configurazione dei sensori, vengono esclusi prima della costruzione dei dataset.
+
+Il §2.3 descrive questo scambio di osservazioni:
+
+- **Training set:** la serie normale ripulita, con le ultime 1.000 osservazioni sostituite dalle prime 1.000 della serie anomala.
+- **Test set:** la serie anomala, con le prime 1.000 osservazioni sostituite dalle ultime 1.000 della serie normale.
+
+Il training descritto nella tesi contiene quindi anche una piccola porzione della registrazione anomala. Le Figure 1 e 2 mostrano rispettivamente i segnali iniziali e i dataset costruiti.
+
+#### Riduzione del rumore con il filtro di Kalman
+
+Il filtro di Kalman aggiorna ricorsivamente una stima del segnale combinando previsione e misura. Serve a ridurre il rumore di acquisizione prima dell'analisi delle sequenze.
+
+Il codice del §2.4.3 impiega un modello scalare con `A = H = 1`, covarianza del rumore di processo `Q = 0.01` e covarianza del rumore di misura `R = 0.1`. La Figura 3 mostra i segnali filtrati.
+
+#### Estrazione della stagionalità
+
+La decomposizione separa la serie in **trend, stagionalità e residui**. Poiché i trend delle due condizioni risultano simili, lo studio aggiunge al dataset la componente stagionale, cercando nei pattern ricorrenti informazioni utili a distinguere i comportamenti.
+
+L'ingresso del modello comprende così **due feature: il segnale z filtrato e la stagionalità**, coerentemente con la forma dell'input riportata nel Capitolo 6. La Figura 4 illustra la decomposizione.
+
+#### Normalizzazione
+
+Le feature vengono normalizzate con `MinMaxScaler` prima dell'ingresso nella rete. Nel pacchetto Python attuale lo scaler viene adattato esclusivamente al training set e poi applicato al test set.
+
+### 3. Perché combinare LSTM e autoencoder?
+*Capitoli 3, 4 e 5*
+
+Le vibrazioni sono **serie temporali**: l'ordine delle misure contiene informazione. Dopo un'introduzione all'apprendimento automatico, la tesi passa dalle reti ricorrenti alle **Long Short-Term Memory**, che usano uno stato di memoria e meccanismi di selezione dell'informazione per modellare dipendenze nel tempo.
+
+L'**autoencoder** introduce invece un compito di ricostruzione:
+
+- L'**encoder** comprime la sequenza in una rappresentazione interna.
+- Il **decoder** usa quella rappresentazione per ricostruire la sequenza di partenza.
+- La differenza tra ingresso e ricostruzione misura quanto bene il modello rappresenta quel comportamento.
+
+Combinando i due approcci, la rete impara una rappresentazione delle sequenze di vibrazione. L'ipotesi del detector è che sequenze diverse dai pattern appresi producano errori di ricostruzione maggiori.
+
+### 4. Costruire e addestrare il modello
+*§6.2–6.5*
+
+Il segnale viene suddiviso in **finestre di 100 campioni**, equivalenti a **0,25 secondi a 400 Hz**. Il codice della tesi avanza di un campione alla volta, producendo finestre sovrapposte. Ogni ingresso ha forma `(100, 2)`: 100 passi temporali e due feature.
+
+| Passaggio | Strato | Forma dell'output per finestra |
+| --- | --- | --- |
+| Ingresso | Sequenza di vibrazione e stagionalità | `100 × 2` |
+| Encoder | LSTM, 16 unità, restituisce la sequenza | `100 × 16` |
+| Rappresentazione compressa | LSTM, 8 unità | `8` |
+| Espansione temporale | RepeatVector, 100 ripetizioni | `100 × 8` |
+| Decoder | LSTM, 8 unità, restituisce la sequenza | `100 × 8` |
+| Decoder | LSTM, 16 unità, restituisce la sequenza | `100 × 16` |
+| Ricostruzione | TimeDistributed(Dense(2)) | `100 × 2` |
+
+Le LSTM utilizzano l'attivazione `tanh`. L'output ha la stessa forma dell'input, così da confrontare direttamente ogni sequenza con la sua ricostruzione.
+
+| Parametro | Esperimento descritto nella tesi |
+| --- | ---: |
+| Lunghezza della finestra | 100 campioni |
+| Epoche | 20 |
+| Batch size | 50 |
+| Quota di validazione | 25% |
+| Loss di ricostruzione | Mean Absolute Error (MAE) |
+
+Il pacchetto attuale compila il modello con **Adam** e loss **MAE**. La Figura 11 della tesi mostra l'andamento della loss di training e validazione, utile per osservare l'apprendimento e l'eventuale divergenza tra le due curve.
+
+### 5. Trasformare l'errore in una decisione
+*§6.1, §6.6–6.7*
+
+Dopo l'addestramento, il modello ricostruisce le sequenze di training e di test. Il detector misura l'errore assoluto medio tra i valori osservati e quelli ricostruiti.
+
+Per una finestra con `T` passi temporali e `F` feature, il punteggio utilizzato nel pacchetto attuale è:
+
+```math
+\mathrm{MAE}(X,\hat X)=\frac{1}{TF}\sum_{t=1}^{T}\sum_{f=1}^{F}|X_{t,f}-\hat X_{t,f}|
+```
+
+La tesi sceglie come **soglia il massimo errore di ricostruzione sul training set**. Una sequenza viene segnalata come anomala quando il suo errore supera questa soglia.
+
+La **Figura 12** mostra la distribuzione della loss sul training; la **Figura 13** confronta le distribuzioni di training e test con la soglia. È il passaggio che collega l'apprendimento della rete alla decisione finale.
+
+### 6. Risultati e conclusioni
+*Capitolo 7, Figura 14*
+
+La tesi riporta i seguenti risultati sul test set dell'esperimento:
+
+| Metrica | Risultato riportato |
+| --- | ---: |
+| Precision | 1,00 |
+| Recall | 1,00 |
+| F1-score | 1,00 |
+
+Il testo delle conclusioni riporta inoltre un'accuratezza del **100%**. La valutazione considera anomala la serie di test ad eccezione delle prime 1.000 osservazioni, provenienti dalla serie normale.
+
+Nel protocollo descritto, questi risultati indicano una separazione completa delle classi valutate. Il contributo dello studio è mostrare come **pulizia del segnale, stagionalità e ricostruzione con LSTM** possano lavorare insieme per distinguere condizioni operative differenti.
+
+I risultati si riferiscono alle condizioni sperimentali e al test set descritti nella tesi. Per valutarne la generalizzazione servono nuove acquisizioni e un protocollo di test indipendente.
+
+## Orientarsi nel repository
+
+| Risorsa | Contenuto |
 | --- | --- |
-| Measurements | Three axes: `x`, `y` and `z` |
-| Sampling frequency | **400 samples per second** (400 Hz) |
-| Normal-operation recording | **9,632,614 rows** |
-| Anomalous-source recording | **531,370 rows** |
-| Selected axis | **z**, identified as the most affected by vibration |
-| Described data cleaning | Removal of peaks attributed to sensor setup issues |
-| Described normal-data volume after peak removal | **3,100,000 rows** |
+| [Tesi completa](Tesi%20%281%29.pdf) | Contesto scientifico, metodo, figure e risultati |
+| [Preprocessing](src/anomaly_detector/preprocessing.py) | Lettura CSV, split, filtro di Kalman, stagionalità e finestre |
+| [Modello](src/anomaly_detector/model.py) | Architettura LSTM Autoencoder |
+| [Scoring](src/anomaly_detector/scoring.py) | MAE, soglia e classificazione delle finestre |
+| [CLI](src/anomaly_detector/cli.py) | Addestramento, scoring e salvataggio degli output |
+| [Test](tests/test_preprocessing.py) | Controlli su dati sintetici |
+| [Configurazione](pyproject.toml) | Dipendenze e installazione |
+| [Script dell'esperimento](legacy/Anomaly%20detector.py) | Implementazione conservata per consultazione |
 
-These figures describe the **historical research material**, not data files distributed here: the original measurements are **not committed to GitHub**. No script in the refactored package automatically reproduces the historical sensor-peak cleaning; users must provide appropriately prepared data.
+## Eseguire il progetto
 
-### Historical train/test construction
+### Installazione
 
-The original README discusses mixing a limited number of observations from the two source recordings when creating train/test sets (including **1,000 observations**). The archived script, however, uses a different sequence of index slices and concatenations. Consequently, the textual account and historical implementation **cannot be assumed to define one identical split**.
-
-The current program deliberately uses a clearly defined, non-overlapping split: it trains on a chosen normal-only segment and tests on held-out normal readings followed by the anomalous-source recording. **This differs from parts of the original written description.** It is intended to make data provenance and leakage risks explicit, not to retroactively claim the exact thesis setup.
-
-## 3. Methodology
-
-### 3.1 Signal filtering — Kalman filter
-
-Vibration measurements include sensor noise. The original implementation applies a scalar Kalman filter to estimate a smoother signal. The historical code uses a process-noise variance of **`Q = 0.01`** and measurement-noise variance of **`R = 0.1`**. The refactored pipeline retains those defaults.
-
-### 3.2 Seasonal decomposition
-
-The study investigates the recurring component of the vibration time series by separating it into **trend, seasonality and residuals** through additive seasonal decomposition (`statsmodels.tsa.seasonal.seasonal_decompose`).
-
-The original README emphasizes seasonality as particularly useful for separating normal and anomalous patterns. The archived model-building script passes **two columns**, filtered `z` and `Seasonality`, to the scaler and network; the current implementation follows that **two-feature implementation** rather than claiming it uses seasonality alone.
-
-**Important unit distinction:** the historical code sets `period=3600`. The decomposition API interprets this value in **samples**, not seconds. At 400 Hz, **3,600 samples = 9 seconds**, not one hour. The actual physical vibration period should be checked against the experimental setup before drawing conclusions.
-
-### 3.3 Normalization
-
-`MinMaxScaler` scales each feature using **training data only**, then applies the same transformation to the test recording. Keeping the test recording out of scaler fitting avoids leaking its amplitude distribution into training.
-
-### 3.4 Sequence model — LSTM autoencoder
-
-An autoencoder learns to reproduce its own input; reconstruction error is therefore a measure of how well an input window matches patterns the model has learned.
-
-The architecture retained from the historical Python script is:
-
-```text
-Input sequence (window_size × 2 features)
-    ↓
-LSTM(16, return_sequences=True)
-    ↓
-LSTM(8)
-    ↓
-RepeatVector(window_size)
-    ↓
-LSTM(8, return_sequences=True)
-    ↓
-LSTM(16, return_sequences=True)
-    ↓
-TimeDistributed(Dense(2))
-    ↓
-Reconstructed input sequence
-```
-
-The model uses the **Adam optimizer** and **mean absolute error (MAE)** reconstruction loss. Historical script settings include **100-sample windows**, **20 epochs** and **batch size 50**. They are configurable in the refactored version.
-
-### 3.5 Anomaly score and decision threshold
-
-For a window with `T` time steps and `F` features, reconstruction error is:
-
-```text
-MAE = (1 / (T × F)) × Σ_t Σ_f |x[t,f] − x_reconstructed[t,f]|
-```
-
-A window is flagged when its MAE **exceeds a threshold calibrated from the training errors**. The archived script uses the **maximum training MAE**. The refactored implementation preserves this as the default and allows an alternative training-loss quantile.
-
-Threshold exceedance signals **unusual reconstruction behavior**, not a confirmed failure mode; meaningful evaluation requires independently established anomaly labels and a suitable test protocol.
-
-## 4. Current repository: reproducible research code
-
-The historical code is preserved unmodified at [`legacy/Anomaly detector.py`](legacy/Anomaly%20detector.py). A reorganized Python package makes the same broad research workflow easier to inspect, run and test.
-
-```text
-.
-├── Tesi (1).pdf                 # Original thesis document
-├── legacy/
-│   └── Anomaly detector.py     # Preserved historical implementation
-├── src/anomaly_detector/
-│   ├── preprocessing.py        # CSV, train/test split, Kalman, seasonality, windows
-│   ├── model.py                # LSTM autoencoder
-│   ├── scoring.py              # Reconstruction MAE and threshold
-│   ├── cli.py                  # End-to-end offline training and scoring
-│   └── __main__.py
-├── tests/                       # Unit tests with synthetic signals
-├── .github/workflows/test.yml   # Automated checks
-└── pyproject.toml               # Package configuration and dependencies
-```
-
-### Requirements and installation
-
-Use **Python 3.10+** and a Python/TensorFlow-compatible environment.
+Servono **Python 3.10+** e un ambiente compatibile con TensorFlow.
 
 ```bash
 git clone https://github.com/Michelox/Anomaly-Detector.git
@@ -129,18 +156,19 @@ cd Anomaly-Detector
 python -m venv .venv
 source .venv/bin/activate
 python -m pip install -e ".[train,test]"
-python -m pytest -q
 ```
 
-On Windows, activate the virtual environment with `.venv\Scripts\activate`.
+Su Windows, attivare l'ambiente con `.venv\Scripts\activate`.
 
-### Input requirements
+### Preparazione degli input
 
-Provide two CSVs with at least three numeric columns (`x`, `y`, `z`), one representing normal operation and the other an anomalous-source recording. By default each CSV has a header; use `--no-header` when both files have none. **Only the third column (z-axis)** is loaded.
+I CSV sperimentali non sono inclusi nel repository: occorre fornire i propri dati, già ripuliti dagli eventuali errori di acquisizione.
 
-Place input files in `data/`, which is ignored by Git. The original study's raw CSVs are not distributed in this repository.
+Fornire due CSV: uno con misure normali e uno con la registrazione anomala. Il programma legge la **terza colonna**, corrispondente all'asse z, che deve contenere valori numerici finiti. L'intestazione è prevista per impostazione predefinita; aggiungere `--no-header` se entrambi i file ne sono privi.
 
-### Run the pipeline
+Collocare i file, ad esempio, in `data/normal.csv` e `data/anomalous.csv`. Con il periodo predefinito, ciascuna serie risultante dallo split deve contenere almeno **7.200 campioni**, necessari alla decomposizione stagionale. Il programma riserva inoltre 1.000 campioni normali al test. Il periodo è espresso in campioni: 3.600 campioni corrispondono a 9 secondi a 400 Hz. La pipeline lavora offline, perché la decomposizione stagionale usa l'intera serie fornita.
+
+### Addestramento e rilevamento
 
 ```bash
 python -m anomaly_detector \
@@ -149,56 +177,28 @@ python -m anomaly_detector \
   --output-dir outputs/run1
 ```
 
-To explore parameters close to the historical script's **index range and dense-window settings**:
+I valori predefiniti includono finestre di 100 campioni, passo 100, 20 epoche e batch size 50. Per usare finestre sovrapposte come nel codice della tesi, aggiungere `--window-stride 1`: su milioni di osservazioni questa scelta aumenta sensibilmente il consumo di memoria e il tempo di calcolo.
+
+Per consultare tutte le opzioni e avviare i test:
 
 ```bash
-python -m anomaly_detector \
-  --normal-csv data/normal.csv \
-  --anomalous-csv data/anomalous.csv \
-  --train-start 5900000 \
-  --train-end 9000000 \
-  --healthy-test-samples 1000 \
-  --seasonal-period 3600 \
-  --window-size 100 \
-  --window-stride 1 \
-  --epochs 20 \
-  --batch-size 50
+python -m anomaly_detector --help
+python -m pytest -q
 ```
 
-These indices are appropriate **only for a compatible, sufficiently long input CSV**. In particular, they do not automatically apply to an already cleaned 3.1-million-row file. Dense `--window-stride 1` windows can consume substantial memory; the current **default stride of 100** reduces that cost but changes the experimental sampling of windows.
+### Output
 
-### Saved outputs
-
-| Artifact | Purpose |
+| File | Contenuto |
 | --- | --- |
-| `model.keras` | Trained Keras model |
-| `scaler.joblib` | Training-fitted feature scaler |
-| `train_scores.csv` | Window offsets and training reconstruction loss |
-| `test_scores.csv` | Test-window loss, threshold and flagged windows |
-| `loss.png` | Training versus test reconstruction-error chart |
-| `run.json` | Run parameters, threshold and basic counts |
+| `model.keras` | Modello addestrato |
+| `scaler.joblib` | Scaler adattato ai dati di training |
+| `train_scores.csv` | Posizione delle finestre e loss sul training |
+| `test_scores.csv` | Loss, soglia e segnalazione delle finestre anomale |
+| `loss.png` | Grafico degli errori di ricostruzione e della soglia |
+| `run.json` | Parametri, soglia e conteggi dell'esecuzione |
 
-Files are written beneath `--output-dir` and excluded from version control.
+In `test_scores.csv`, `is_anomaly` rappresenta la decisione del modello. `overlaps_anomalous_source` indica soltanto se la finestra interseca la registrazione anomala: è un'informazione sulla provenienza, non un'etichetta di guasto verificata.
 
-## 5. Interpretations, differences and limits
+---
 
-**What the research proposes:** sensor-data denoising and seasonal analysis, followed by an LSTM autoencoder whose reconstruction error can surface unusual conveyor-belt behavior.
-
-**What the current code supports:** configurable *offline* model training and window-level scoring with train-only scaling and threshold selection, including lightweight synthetic tests. The new pipeline is **not guaranteed to reproduce the original thesis graphs or results** because the source datasets, environment and historical preprocessing details are not fully available.
-
-Other important constraints:
-
-- **No measured thesis performance is claimed here.** The PDF is the reference for experimental findings. Do not infer accuracy, precision, recall or fault-detection capability from the code or unit tests alone.
-- **Not a causal, real-time detector.** Seasonal decomposition looks at a full supplied signal, including information from later test samples.
-- **Source recording is not ground truth.** A window overlapping the anomalous-source recording need not correspond to a verified fault. `overlaps_anomalous_source` in exported scores is only a provenance indicator.
-- **Historical preprocessing is incomplete in the repository.** Original spike-removal decisions and intermediate CSV artifacts are not supplied.
-- **Methodological differences matter.** The historic account of train/test swapping, feature selection and the original script's data slicing should be reconciled with the full thesis before claiming scientific reproducibility.
-- **The max-training-error threshold is sensitive to outliers.** A deployable alarm would require independent calibration and validation.
-
-## Thesis and provenance
-
-The original academic document is kept in this repository:
-
-**[Open `Tesi (1).pdf`](Tesi%20(1).pdf)**
-
-The research overview above follows the **original repository description and archived code**, while installation and implementation sections describe the modernized package. This explicit separation prevents engineering changes introduced during refactoring from being mistaken for conclusions established by the thesis.
+**Riferimento:** Michele Ciaramidaro, *Uso di modelli di Long Short-Term Memory per l’Anomaly Detection negli impianti industriali*, Università degli Studi di Messina, A.A. 2023/2024. Per lo sviluppo teorico e i riferimenti bibliografici, consultare la [tesi completa](Tesi%20%281%29.pdf).
